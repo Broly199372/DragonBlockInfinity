@@ -164,6 +164,9 @@ package com.bernardo.dbi;
 
 import com.bernardo.dbi.client.KeyBindings;
 import com.bernardo.dbi.entity.DinoRenderer;
+import com.bernardo.dbi.client.particle.ModParticles;
+import com.bernardo.dbi.client.particle.DinoMeatParticleProvider;
+import net.minecraftforge.client.event.RegisterParticleProvidersEvent;
 import com.bernardo.dbi.entity.ModEntities;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.EntityRenderersEvent;
@@ -181,6 +184,12 @@ public class ClientSetup {
     @SubscribeEvent
     public static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
         KeyBindings.register(event);
+    }
+
+    @SubscribeEvent
+    public static void onRegisterParticles(net.minecraftforge.client.event.RegisterParticleProvidersEvent event) {
+        event.registerSpriteSet(ModParticles.DINO_MEAT_RAW.get(), DinoMeatParticleProvider::new);
+        event.registerSpriteSet(ModParticles.DINO_MEAT_COOKED.get(), DinoMeatParticleProvider::new);
     }
 
     @SubscribeEvent
@@ -256,6 +265,7 @@ package com.bernardo.dbi;
 import com.bernardo.dbi.block.DBIBlocks;
 import com.bernardo.dbi.entity.ModEntities;
 import com.bernardo.dbi.item.DBIItems;
+import com.bernardo.dbi.client.particle.ModParticles;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
@@ -276,6 +286,7 @@ public class DragonBlockInfinity {
         DBIItems.register(bus);
         DBICreativeTab.register(bus);
         ModEntities.ENTITIES.register(bus);
+        ModParticles.register(bus);
 
         bus.addListener(this::setup);
     }
@@ -869,11 +880,6 @@ public class MenuControl {
 
     public static final ResourceLocation GUI_BG =
         new ResourceLocation(DragonBlockInfinity.MOD_ID, "textures/gui/gui.png");
-
-    public static final ResourceLocation GUI_BG2 =
-        new ResourceLocation(DragonBlockInfinity.MOD_ID, "textures/gui/gui2.png");
-
-
     // â”€â”€ PÃGINA ATUAL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     /** PÃ¡gina que serÃ¡ aberta na prÃ³xima chamada de open(). */
     public static int currentPage = ID_CHARACTER_CREATION;
@@ -901,18 +907,296 @@ package com.bernardo.dbi.client.menu.screens;
 
 import com.bernardo.dbi.client.menu.DBIGuiScreen;
 import com.bernardo.dbi.client.menu.MenuControl;
+import com.bernardo.dbi.client.widget.SmallArrowBtn;
+import com.bernardo.dbi.core.PlayerPreview;
+import com.bernardo.dbi.core.race.Race;
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.network.chat.Component;
 
-/** Tela de criaÃ§Ã£o de personagem â€” delega renderizaÃ§Ã£o ao DBIGuiScreen. */
+/** Tela de criaÃ§Ã£o de personagem com seletor de raÃ§a e color picker. */
 public class CaracterCreation extends DBIGuiScreen {
+
+    // â”€â”€ RAÃ‡A â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    private static final Race[] RACES = Race.values();
+    private int raceIndex = 0;
+
+    // â”€â”€ CORES (3 slots) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    private int[] slotColors = { 0xFFFFFFFF, 0xFF888888, 0xFF333333 };
+    private int activeSlot = -1;
+
+    // â”€â”€ COLOR PICKER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    private boolean colorPickerOpen = false;
+    private float hue = 0f;
+    private float saturation = 1f;
+    private float brightness = 1f;
+    private boolean draggingWheel = false;
+    private boolean draggingBright = false;
 
     public CaracterCreation() {
         super(MenuControl.ID_CHARACTER_CREATION);
     }
 
     @Override
+    protected void init() {
+        super.init();
+        int cx = this.width / 2;
+        int cy = this.height / 2;
+
+        // BotÃ£o â† usando SmallArrowBtn
+        this.addRenderableWidget(new SmallArrowBtn(
+            cx + 58, cy - 122,
+            SmallArrowBtn.Direction.LEFT,
+            () -> {
+                raceIndex = (raceIndex - 1 + RACES.length) % RACES.length;
+                colorPickerOpen = false;
+            }
+        ));
+
+        // BotÃ£o â†’ usando SmallArrowBtn
+        this.addRenderableWidget(new SmallArrowBtn(
+            cx + 88, cy - 122,
+            SmallArrowBtn.Direction.RIGHT,
+            () -> {
+                raceIndex = (raceIndex + 1) % RACES.length;
+                colorPickerOpen = false;
+            }
+        ));
+    }
+
+    @Override
     public void render(GuiGraphics gui, int mouseX, int mouseY, float partialTick) {
+        this.renderBackground(gui);
+
+        int cx = this.width / 2;
+        int cy = this.height / 2;
+
+        // Fundo GUI
+        gui.blit(MenuControl.GUI_BG, cx - 128, cy - 128, 0, 0, 256, 256, 256, 256);
+
+        // Preview do player / raÃ§a
+        Race current = RACES[raceIndex];
+        if (current.hasTexture()) {
+            gui.blit(current.getTexture(), cx - 40, cy - 80, 0, 0, 64, 64, 64, 64);
+        } else {
+            PlayerPreview.render(gui, cx - 40, cy + 20, 40, 0f);
+        }
+
+        // Nome da raÃ§a â€” entre os botÃµes
+        gui.drawCenteredString(this.font,
+            Component.literal(current.getDisplayName()),
+            cx + 74, cy - 113, 0xFFFFFF);
+
+        // 3 quadrados de cor â€” bem abaixo do nome da raÃ§a
+        int slotY = cy - 88;
+        int slotSize = 14;
+        int slotStartX = cx + 52;
+        for (int i = 0; i < 3; i++) {
+            int sx = slotStartX + i * (slotSize + 5);
+            // fill da cor
+            gui.fill(sx, slotY, sx + slotSize, slotY + slotSize, slotColors[i]);
+            // borda branca
+            gui.fill(sx - 1, slotY - 1, sx + slotSize + 1, slotY,              0xFFFFFFFF);
+            gui.fill(sx - 1, slotY + slotSize, sx + slotSize + 1, slotY + slotSize + 1, 0xFFFFFFFF);
+            gui.fill(sx - 1, slotY - 1, sx,              slotY + slotSize + 1, 0xFFFFFFFF);
+            gui.fill(sx + slotSize, slotY - 1, sx + slotSize + 1, slotY + slotSize + 1, 0xFFFFFFFF);
+        }
+
+        // Color picker (sÃ³ slot 0)
+        if (colorPickerOpen && activeSlot == 0) {
+            renderColorPicker(gui, mouseX, mouseY, cx, cy);
+        }
+
+        // TÃ­tulo
+        gui.drawCenteredString(this.font,
+            Component.translatable("screen.dragonblockinfinity.character_creation"),
+            cx, cy - 120, 0xFFFFFF);
+
         super.render(gui, mouseX, mouseY, partialTick);
+    }
+
+    private void renderColorPicker(GuiGraphics gui, int mouseX, int mouseY, int cx, int cy) {
+        int px = cx - 120;
+        int py = cy - 50;
+        int size = 80;
+
+        // Fundo escuro
+        gui.fill(px - 4, py - 4, px + size + 54, py + size + 28, 0xCC000000);
+
+        // Gradiente de hue
+        for (int s = 0; s < size; s++) {
+            float h = (float) s / size;
+            gui.fill(px + s, py, px + s + 1, py + size, hsvToArgb(h, saturation, brightness));
+        }
+
+        // Indicador de hue
+        int hueX = px + (int)(hue * size);
+        gui.fill(hueX, py - 2, hueX + 2, py + size + 2, 0xFFFFFFFF);
+
+        // Barra de brilho
+        int barY = py + size + 8;
+        for (int b = 0; b < size; b++) {
+            float bv = (float) b / size;
+            gui.fill(px + b, barY, px + b + 1, barY + 10, hsvToArgb(hue, saturation, bv));
+        }
+
+        // Indicador de brilho
+        int brightX = px + (int)(brightness * size);
+        gui.fill(brightX, barY - 2, brightX + 2, barY + 12, 0xFFFFFFFF);
+
+        // Preview da cor atual
+        gui.fill(px + size + 8, py, px + size + 44, py + 36, slotColors[0]);
+    }
+
+    @Override
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        int cx = this.width / 2;
+        int cy = this.height / 2;
+
+        // Clique nos slots
+        int slotY = cy - 88;
+        int slotSize = 14;
+        int slotStartX = cx + 52;
+        for (int i = 0; i < 3; i++) {
+            int sx = slotStartX + i * (slotSize + 5);
+            if (mouseX >= sx && mouseX <= sx + slotSize &&
+                mouseY >= slotY && mouseY <= slotY + slotSize) {
+                if (i == 0) {
+                    activeSlot = 0;
+                    colorPickerOpen = !colorPickerOpen;
+                }
+                return true;
+            }
+        }
+
+        // Clique no color picker
+        if (colorPickerOpen && activeSlot == 0) {
+            int px = cx - 120;
+            int py = cy - 50;
+            int size = 80;
+
+            if (mouseX >= px && mouseX <= px + size &&
+                mouseY >= py && mouseY <= py + size) {
+                hue = (float)((mouseX - px) / size);
+                hue = Math.max(0f, Math.min(1f, hue));
+                slotColors[0] = hsvToArgb(hue, saturation, brightness);
+                draggingWheel = true;
+                return true;
+            }
+
+            int barY = py + size + 8;
+            if (mouseX >= px && mouseX <= px + size &&
+                mouseY >= barY && mouseY <= barY + 10) {
+                brightness = (float)((mouseX - px) / size);
+                brightness = Math.max(0f, Math.min(1f, brightness));
+                slotColors[0] = hsvToArgb(hue, saturation, brightness);
+                draggingBright = true;
+                return true;
+            }
+        }
+
+        return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        int cx = this.width / 2;
+        int cy = this.height / 2;
+        int px = cx - 120;
+        int py = cy - 50;
+        int size = 80;
+
+        if (draggingWheel) {
+            hue = (float)((mouseX - px) / size);
+            hue = Math.max(0f, Math.min(1f, hue));
+            slotColors[0] = hsvToArgb(hue, saturation, brightness);
+            return true;
+        }
+        if (draggingBright) {
+            brightness = (float)((mouseX - px) / size);
+            brightness = Math.max(0f, Math.min(1f, brightness));
+            slotColors[0] = hsvToArgb(hue, saturation, brightness);
+            return true;
+        }
+        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+    }
+
+    @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        draggingWheel = false;
+        draggingBright = false;
+        return super.mouseReleased(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (keyCode == 256) {
+            if (colorPickerOpen) { colorPickerOpen = false; return true; }
+            MenuControl.close();
+            return true;
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    private static int hsvToArgb(float h, float s, float v) {
+        float[] rgb = java.awt.Color.getHSBColor(h, s, v).getRGBColorComponents(null);
+        int r = (int)(rgb[0] * 255);
+        int g = (int)(rgb[1] * 255);
+        int b = (int)(rgb[2] * 255);
+        return (0xFF << 24) | (r << 16) | (g << 8) | b;
+    }
+}
+\n--- src/main/java/com/bernardo/dbi/client/particle/DinoMeatParticleProvider.java ---
+package com.bernardo.dbi.client.particle;
+
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.particle.ParticleProvider;
+import net.minecraft.client.particle.SpriteSet;
+import net.minecraft.client.particle.TextureSheetParticle;
+import net.minecraft.core.particles.SimpleParticleType;
+
+public class DinoMeatParticleProvider implements ParticleProvider<SimpleParticleType> {
+
+    private final SpriteSet sprites;
+
+    public DinoMeatParticleProvider(SpriteSet sprites) {
+        this.sprites = sprites;
+    }
+
+    @Override
+    public TextureSheetParticle createParticle(SimpleParticleType type, ClientLevel level,
+            double x, double y, double z, double dx, double dy, double dz) {
+        net.minecraft.client.particle.BreakingItemParticle particle =
+            net.minecraft.client.particle.BreakingItemParticle.createBreaking(
+                level, x, y, z, net.minecraft.world.item.Items.PORKCHOP);
+        particle.pickSprite(sprites);
+        return particle;
+    }
+}
+\n--- src/main/java/com/bernardo/dbi/client/particle/ModParticles.java ---
+package com.bernardo.dbi.client.particle;
+
+import com.bernardo.dbi.DragonBlockInfinity;
+import net.minecraft.core.particles.SimpleParticleType;
+import net.minecraftforge.registries.DeferredRegister;
+import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraftforge.registries.RegistryObject;
+import net.minecraft.core.particles.ParticleType;
+import net.minecraftforge.eventbus.api.IEventBus;
+
+public class ModParticles {
+
+    public static final DeferredRegister<ParticleType<?>> PARTICLES =
+        DeferredRegister.create(ForgeRegistries.PARTICLE_TYPES, DragonBlockInfinity.MOD_ID);
+
+    public static final RegistryObject<SimpleParticleType> DINO_MEAT_RAW =
+        PARTICLES.register("dino_meat_raw_particle", () -> new SimpleParticleType(false));
+
+    public static final RegistryObject<SimpleParticleType> DINO_MEAT_COOKED =
+        PARTICLES.register("dino_meat_cooked_particle", () -> new SimpleParticleType(false));
+
+    public static void register(IEventBus bus) {
+        PARTICLES.register(bus);
     }
 }
 \n--- src/main/java/com/bernardo/dbi/client/skill/FlightKeyHandler.java ---
@@ -1092,67 +1376,6 @@ public class SmallArrowBtn extends DBIBtnManager {
         super(x, y, 10, 10, dir.u, 14, 24, onClick);
     }
 }
-\n--- src/main/java/com/bernardo/dbi/core/PlayerPreview.java ---
-package com.bernardo.dbi.core;
-
-import com.bernardo.dbi.core.race.PlayerRaceData;
-import com.bernardo.dbi.core.race.Race;
-import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.PoseStack;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
-import net.minecraft.world.entity.player.Player;
-import org.joml.Quaternionf;
-
-public class PlayerPreview {
-
-    // Textura temporÃ¡ria para o menu â€” null = usa skin normal
-    public static Race previewRace = null;
-
-    public static void render(GuiGraphics graphics, int x, int y, int size, float yaw) {
-        Minecraft mc = Minecraft.getInstance();
-        Player player = mc.player;
-        if (player == null) return;
-
-        previewRace = PlayerRaceData.getRace(player.getUUID());
-
-        PoseStack poseStack = graphics.pose();
-        poseStack.pushPose();
-        poseStack.translate(x, y, 50);
-        poseStack.scale(size, size, -size);
-        poseStack.mulPose(new Quaternionf().rotateZ((float) Math.PI));
-
-        float savedYBodyRot  = player.yBodyRot;
-        float savedYRot      = player.getYRot();
-        float savedYHeadRot  = player.yHeadRot;
-        float savedYHeadRotO = player.yHeadRotO;
-        float savedXRot      = player.getXRot();
-
-        player.yBodyRot  = 180f + yaw;
-        player.setYRot(180f + yaw);
-        player.setXRot(0f);
-        player.yHeadRot  = 180f + yaw;
-        player.yHeadRotO = 180f + yaw;
-
-        EntityRenderDispatcher dispatcher = mc.getEntityRenderDispatcher();
-        dispatcher.setRenderShadow(false);
-        RenderSystem.runAsFancy(() -> {
-            dispatcher.render(player, 0, 0, 0, 0f, 1f, poseStack, graphics.bufferSource(), 0xF000F0);
-        });
-        graphics.flush();
-        dispatcher.setRenderShadow(true);
-
-        player.yBodyRot  = savedYBodyRot;
-        player.setYRot(savedYRot);
-        player.setXRot(savedXRot);
-        player.yHeadRot  = savedYHeadRot;
-        player.yHeadRotO = savedYHeadRotO;
-
-        poseStack.popPose();
-        previewRace = null;
-    }
-}
 \n--- src/main/java/com/bernardo/dbi/core/PlayerReadyState.java ---
 package com.bernardo.dbi.core;
 
@@ -1253,7 +1476,10 @@ import net.minecraft.resources.ResourceLocation;
 
 public enum Race {
     HUMAN(null),
-    ARCOSIAN_MALE(new ResourceLocation(DragonBlockInfinity.MOD_ID, "textures/cc/male/ac1b.png"));
+    ARCONSIAN(new ResourceLocation(DragonBlockInfinity.MOD_ID, "textures/cc/male/ac1b.png")),
+    SAIYAN(null),
+    NAMEKIAN(null),
+    ANDROID(null);
 
     private final ResourceLocation texture;
 
@@ -1263,6 +1489,16 @@ public enum Race {
 
     public ResourceLocation getTexture() { return texture; }
     public boolean hasTexture() { return texture != null; }
+
+    public String getDisplayName() {
+        return switch (this) {
+            case HUMAN    -> "Human";
+            case ARCONSIAN -> "Arconsian";
+            case SAIYAN   -> "Saiyan";
+            case NAMEKIAN -> "Namekian";
+            case ANDROID  -> "Android";
+        };
+    }
 }
 \n--- src/main/java/com/bernardo/dbi/core/skill/FlightSkill.java ---
 package com.bernardo.dbi.core.skill;
@@ -1312,52 +1548,76 @@ public class FlightSkill {
 }
 \n--- src/main/java/com/bernardo/dbi/core/system/KiSystem.java ---
 package com.bernardo.dbi.core.system;
-
-import com.bernardo.dbi.stats.Spi;
-import com.bernardo.dbi.stats.Will;
-
+/**
+ * Sistema de Ki (Energia) para o mod Dragon Block Infinity
+ * Gerencia o consumo e geraÃ§Ã£o de Ki para habilidades especiais
+ */
 public class KiSystem {
+    
+    // Custo de Ki base para um ataque de soco
+    public static final int KI_SOCO_BASE = 5;
+    
+    // Custo de Ki para correr/dash
+    public static final int KI_RUN = 3;
+    
+    // Flag que indica se o boost estÃ¡ ativo
+    public boolean boostAtivo;
+    
+    // Custo de Ki por tick (executado a cada frame) quando o boost estÃ¡ ativo
+    public static final int custoTick = 8;
 
-    public int Spi;
-    public int Will;
-    public int regenKi;
-
-    public KiSystem(int spi, int will) {
-        this.Spi = spi;
-        this.Will = will;
-        this.regenKi = 0;
-    }
-
-    // Regen parado (idle)
-    public void regenerateIdleKi(Spi spi) {
-        regenKi = (int)(spi.getMaxKi() * spi.getKiRegenRate());
-        spi.restoreKi(regenKi);
-    }
-
-    // Regen em combate
-    public void regenerateCombatKi(Spi spi) {
-
-        // Se estiver gastando muito Ki, reduz regen
-        if (regenKi <= -5) {
-            regenKi = (int)(spi.getMaxKi() * (spi.getKiRegenRate() * 0.5));
-        } else {
-            regenKi = (int)(spi.getMaxKi() * (spi.getKiRegenRate() * 0.2));
+    /**
+     * Tenta usar/consumir a quantidade especificada de Ki
+     * @param amount Quantidade de Ki a ser consumida
+     * @return true se havia Ki suficiente e foi consumido, false caso contrÃ¡rio
+     */
+    public boolean useKi(int amount) {
+        // Verifica se hÃ¡ Ki suficiente
+        if (currentKi < amount) {
+            return false;
         }
-
-        spi.restoreKi(regenKi);
+        // Consome o Ki
+        currentKi -= amount;
+        return true;
     }
 
-    public void consumeKI(Spi spi, int amount) {
-        spi.useKi(amount);
+    
+    // Calcula o custo do ataque de soco com multiplicador de transformaÃ§Ã£o
+    int custo = (int)(KI_SOCO_BASE * transform.getMultiplier());
+
+    // Se houver Ki suficiente, realiza o ataque de soco
+    if (kiSystem.useKi(custo)) {
+    }
+    
+    // Calcula o custo de correr com multiplicador de transformaÃ§Ã£o
+    int run = (int)(KI_RUN * transform.getMultiplier());
+
+    // Se houver Ki suficiente, permite correr
+    if (kiSystem.useKi(run)) {
+    }
+    
+    // Verifica se o boost estÃ¡ ativo
+    if (boostAtivo) {
+        // Tenta consumir Ki a cada tick para manter o boost ativo
+        if (!useKi(custoTick)) {
+            // Se nÃ£o houver Ki suficiente, desativa o boost
+            boostAtivo = false; // acabou o Ki
+        }
     }
 
-    public void consumeKiJump(Spi spi, int amount) {
-        spi.useKi(amount);
+       
+    /**
+     * Drena (consome) uma quantidade de Ki a cada tick
+     * Usado para efeitos contÃ­nuos como voo ou transformaÃ§Ãµes
+     * @param amount Quantidade de Ki a ser drenada por tick
+     */
+    public void drainPerTick(int amount) {
+        // Tenta consumir o Ki
+        if (!useKi(amount)) {
+            // Se nÃ£o houver Ki, a aÃ§Ã£o se interrompe
+        }
     }
 
-    public void consumeKIRun(Spi spi, int amount) {
-        spi.useKi(amount);
-    }
 }
 \n--- src/main/java/com/bernardo/dbi/entity/DinoEntity.java ---
 package com.bernardo.dbi.entity;
@@ -1520,6 +1780,7 @@ import com.bernardo.dbi.DragonBlockInfinity;
 import com.bernardo.dbi.block.DBIBlocks;
 import com.bernardo.dbi.item.armor.GokuArmorItem;
 import com.bernardo.dbi.entity.ModEntities;
+import com.bernardo.dbi.item.SenzuBeanItem;
 import net.minecraft.world.item.ArmorItem;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
@@ -1571,7 +1832,7 @@ public class DBIItems {
             .nutrition(12).saturationMod(0.8f).meat().build())));
 
     public static final RegistryObject<Item> SENZU_BEAN = ITEMS.register("senzu_bean",
-        () -> new Item(new Item.Properties().stacksTo(16).food(new FoodProperties.Builder().nutrition(20).saturationMod(2.0f).alwaysEat().build())));
+        () -> new SenzuBeanItem());
 
     // â”€â”€ ARMADURA GOKU â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public static final RegistryObject<Item> GOKU_CHESTPLATE = ITEMS.register("goku_chestplate", () -> new GokuArmorItem(ArmorItem.Type.CHESTPLATE));
@@ -1580,6 +1841,50 @@ public class DBIItems {
 
     public static void register(IEventBus bus) {
         ITEMS.register(bus);
+    }
+}
+\n--- src/main/java/com/bernardo/dbi/item/SenzuBeanItem.java ---
+package com.bernardo.dbi.item;
+
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.food.FoodProperties;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.UseAnim;
+import net.minecraft.world.level.Level;
+
+/** Senzu Bean â€” cura total ao comer. */
+public class SenzuBeanItem extends Item {
+
+    public SenzuBeanItem() {
+        super(new Properties()
+            .stacksTo(16)
+            .food(new FoodProperties.Builder()
+                .nutrition(20)
+                .saturationMod(2.0f)
+                .alwaysEat()
+                .build()));
+    }
+
+    @Override
+    public UseAnim getUseAnimation(ItemStack stack) {
+        return UseAnim.EAT;
+    }
+
+    @Override
+    public int getUseDuration(ItemStack stack) {
+        return 32;
+    }
+
+    @Override
+    public ItemStack finishUsingItem(ItemStack stack, Level level, LivingEntity entity) {
+        if (entity instanceof Player player) {
+            player.setHealth(player.getMaxHealth());
+            player.getFoodData().setFoodLevel(20);
+            player.getFoodData().setSaturation(20.0f);
+        }
+        return super.finishUsingItem(stack, level, entity);
     }
 }
 \n--- src/main/java/com/bernardo/dbi/item/armor/GokuArmorItem.java ---
@@ -4477,7 +4782,7 @@ o¾ƒÀ*ôGœqf2ñ5òOQñ'ş¢|O"ºö¦[BLıò}éÎû”O3şîÖ„AÊ d02Xô~>Ö"àf2XGmƒ™
 l½`‹=.`Û7Äêb_«ËúêıZA[¬ÕŞ×%n)#»eMs±ÚE­‹ß¶Ùâ¶¾]qê¯8KÇêùĞg üø5v?_ÕY\öD«>¶-™ú˜1”¿hÀÙ‚Í¶âµÍb²\Šg»±ëÂÔÖàÛã³8ïÛcß1íkÚö{)¶Tß'çĞbZ¿øÆ­ÅìŸÆÛÓ-}ˆ¨ïsú¾V¿óúeß¼(_ûÙOe+7çğ.f¯ÆXkvaúÅìŸÆëiò<k~“ğùüÓdë3äó¡¹iî~q¾Öæç¦¾Š³­òX9æR_=[µ˜1=Z¿øÁÛ‚×¢Öâ÷í±¼nüÎ¹ÏWÕßY¤¹tí½Ey÷ÊåJ»Å]úÑ–m;'e»}œò)×îÃØgùÔ¦dÖ'×çS|çóÕíÇµãù\õ~a¾]q·mã…©6«÷°êã6Æ•òY?M¹2ó³zÿ°~ñ|xg‹Uî§ë@íÊíÏ›Õ5‡®6õ×V6ëôQß¡oë€ı>wıNşbÜÕ‹ó)\wÍ³ûË¿ˆ}³xàûª^'Qû:¹Ú·­Õ)NÛ,ÎbÕ®rWœÚ|ëç¾Í—}Œ•­ÍçS9Æi_¹²8«³vŸSı´5û«ç'æí/²Ñ9ÑÇV­¿õ};¼ «8kùşşşCãÓØKãŒs\ÌéÊ;Ìhãâ7üc}^ÔÉÎ’ò¬z®ÔW/ÖèQœ.(íû­.:ÕÕİ!/¤x|åÖVíşØÙÕ^É/ŞÂø”WÇéÚf±G}Şl¼š³Ê¥9x/ß§ØúìæÖ•ÓßÜÓ·ëCmëü`¨ƒîW¶XêEbv!úµë´Wà¨nŒÃéÙ1ı$¶ßµú>ìwnõ³>‡éb½X÷‚f¸¸»¬ÚbŸ,oWÆ§qÙ¶.‡Š£xË©1dù}\Öîë²XùÆş0}m|2‰e?öØ&§ÃşÑÔÏ â‹q~(:aşb¶'{áÍúeñ>Ÿï«zåV_Ûî˜õQ¼úÇ­o·²òfqjó}VÅ©O§º®|>ÆrÙ¿Ò|»òèÅ8Ë×§ñúÊ²s®¸,_<oõ˜İÚŸÍCõ]¹å±‰íQİõ+ñ&æğ(sÔoÖÃÉ[Çõ'ÍÙógš7€‡}‹ñ>³ëkÕõ±}ûÃòµ·şÓ¨%nÎá]ÌäÒï—_ë¾8?NÎŸ“İ+ßHÏ›…û8uoäÑy+]ÏšWkëævĞ¾c½_È.ˆÜŠ
 ËÑ¸ˆ\¼~Wó´k®‹Bµ»:qKÙYùê\EoÕ+n™¡YŠqÚù¬—=Ôó¡g ÍÎ÷²ùdqSªKo º <Di!Ç˜Ø·]ÜçÈÊÄe*Ëºì&àÏC×¹Ëâ²|Ë£Ío~¿T>ªó–Góìº}?Ågv]m>ÇÊ­kr~ğ‚o÷å,6ËéûP>¼€w÷Ş¾>¥+Î÷óq1Çöãøã~œƒo÷e‹óû¾sŒe¿qÈ&ä/„¾“Êúd¹ûæ#®Ÿ@tû¥,¥¸R})ÏëK×]©>›ƒbµÍbÆZ×¸d'ü “Îúd¹ÇŠ6ÔqG÷¸_w)®T_Ê3´úUã/µg×j›ÅÍ`Õx7 Î&•M¾”8‹Ír–úS0ïî½}}ÌÜçûù¸˜c¨û~üc6,Îâ³XåéÓîc‡\nİ J“+AùÉe1« }ÊğîòÖÖ2úöx„,ÎÇûöØwLûš‡¶}Æ^Š-Õ÷É9´˜ô`ƒÜÄ$7‘ch`CO×bõş>.Î¡çëcŸ¡ïû±û²Ûïûr6§Ø÷³>cª+Ş l~²¾\š ñåR<õ›(y—êã‘c\ÜñcØ·9”æÑÕç¦ÚÆö1ï×Ÿ°uìf±ûÍ‡ï.ÿŞôÚ›¿[DÇ¾Yü"x¿àûúzÊë˜ı*oËª}|ÛêâyóqV®Üù¶İ©Ÿ·ÇqñÛyİú|ÚAâ£ïDb?ö›]ŸzkF.÷¼ıºı}ßeÆa•4§ÒGÇ³ÑÚÍĞ?Òw6~*×7€.t~;ğ7ê8u*ÅÇ8Å³EàQ
 è&°Î1µ€Ówã%v¦ÅüÒƒåS|?¸??9ÿc-îR|Œó9(#€À0ê× ßúWõÁ§?QıâöíÆ(¿útõÒ~·¯}Ûfq¾2O ñÇ@¶ày €Àt7€ìÀt(˜)ÓèüÀô8˜1Óh<è;õ_øBõïı×üãÖ‰üÿñó1”@`Xkß ìİ {'Ànñ¡w
-b=û 0LÅÛ€öÊ~öĞBgqg:Ô!0nµ?´êƒú@Å¸Y=ÓèõQ`-j-ş³Ï¤:úê)Å§AT"€À`_òÊ§^NõëşX	ˆµ}{êƒÎ¿.~qèÎÙs•ni2*@`Põ‹€'şt¼º÷ô;Õé›7ƒ»}ş|õÊW_®ì&À?Æ» ¶àû<ô“_±Úß{C5l@`@ö`“`Œ p0Æ oŠû¯Í#õ“_û}û‡ Ãà£ÀÃ8Œ#XûÀìéSÕõ;ów®^œùú|·šİ¿w$“à  p0úÛ­«½=ŞûúÇuµŞÔg²X«S\©zÀ1[°¶¨µĞ³¡±¨3ê¿ÀZ¿è§ÿÎë—Ó™Ûÿ:k1Ü0R*œÀâW€oùéà~ó÷ŸÖõz¦Pÿ©'_¬ëôe‹ÿ2ùù3•İ¸¤”T"08úÀ©½oUïßı¨úá­¿6øã¾RÙA7F#; 0zÆ¯ ¶àû<ô“_±Úß½rFUl@`@ö`s`ˆ p@Æ oıÎ¿øÉ¿ÿl<@`||p|çŒ#°1µŸø/•Ô—Nê‹$§ş’;+$Bà	,Ş´w²ÇÙ›uµŞÚÓg²X«S\©zÀZÿ%Øp†ÍH@ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ Ø¢Àÿßx*ñ¹>    IEND®B`‚\n--- src/main/resources/assets/dragonblockinfinity/textures/item/dbi_goku_amor.png ---
+b=û 0LÅÛ€öÊ~öĞBgqg:Ô!0nµ?´êƒú@Å¸Y=ÓèõQ`-j-ş³Ï¤:úê)Å§AT"€À`_òÊ§^NõëşX	ˆµ}{êƒÎ¿.~qèÎÙs•ni2*@`Põ‹€'şt¼º÷ô;Õé›7ƒ»}ş|õÊW_®ì&À?Æ» ¶àû<ô“_±Úß{C5l@`@ö`“`Œ p0Æ oŠû¯Í#õ“_û}û‡ Ãà£ÀÃ8Œ#XûÀìéSÕõ;ów®^œùú|·šİ¿w$“à  p0úÛ­«½=ŞûúÇuµŞÔg²X«S\©zÀ1[°¶¨µĞ³¡±¨3ê¿ÀZ¿è§ÿÎë—Ó™Ûÿ:k1Ü0R*œÀâW€oùéà~ó÷ŸÖõz¦Pÿ©'_¬ëôe‹ÿ2ùù3•İ¸¤”T"08úÀ©½oUïßı¨úá­¿6øã¾RÙA7F#; 0zÆ¯ ¶àû<ô“_±Úß½rFUl@`@ö`s`ˆ p@Æ oıÎ¿øÉ¿ÿl<@`||p|çŒ#°1µŸø/•Ô—Nê‹$§ş’;+$Bà	,Ş´w²ÇÙ›uµŞÚÓg²X«S\©zÀZÿ%Øp†ÍH@ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ Ø¢Àÿßx*ñ¹>    IEND®B`‚\n--- src/main/resources/assets/dragonblockinfinity/textures/item/dbi_goku_armor.png ---
 ‰PNG
 
    IHDR   @   @   ªiqŞ  IDATxœ]›y|]Wuï¿kŸ;JWÒ•lÉò<Ïqæ‚;$@!´¼–†RJJ>ÚÒ}|x@_)4M¡J	Ğ	¥òB¡L¤48“ÁN²âQ–dY³t¯t‡³×ûcï}Î5¶?òÕ½çî³÷Z¿µÖoG–,tb÷GUA$}ˆŠ{_TÂ…îÿ«((ş«òK‡ß•ğÃ­…º÷$Ù»¯XUÄßJDÜâê7›,#É>ÃêâWÓ–{¢ÚòEeÆ¢XÔ}EAı}°ê^£X·ÃËo.îş¼¨?©Š?”º×NhÖ]eü5ª Ö*lÉ¯%‚’®­A€6îwë.¤‡'Fø¶Û—EU±b½RLr…	ÂScıë CU“( ùDÅ/&XœÆÔJP)©^[•@Á½R'ädá9Æ#ÊıoUˆI˜ˆ;†‡[O°^9*îVİûØg¢Í™&Š¿¥“¶ø}†û¢A$&îµ·ÖtShŠÔAİÉ±®Q*Bøë· ÌŞ­™Ïk>A@*à€ĞI	H”"Öª³Y ‡€“š©x»Ku•l^IN´lw¨TÔNk¶îZõ†/AH Æ¦Àë´àĞ}Ç¦	›bMLÊ™™G‹˜D¼lVÁâ´¥Š¶Úe*H¡—Ø­wT©K²)Qw@çaR”‰¼`ƒS
@@ -4683,19 +4988,7 @@ p}yF¿âĞ$zªà!½©)åJ·9ûåI5ŞÂØPï}!56ÿ¢:Æä/õ)\‹¸U‡c  °ò]–CÊu	CP§ï©C9·;êo(j.nõÅŠ¹
 +=XÌæÕ™¯/)dÅ‘°bWó«çê^<ñ ªÃ|‹ü&·èê'¤½ò2ˆºi&Öp¿øĞ¥/Kp—xt"j°DnÒøù\c˜–écM\¸§@A	|¶ëğt‡éd{E,½DX¬…Âa4Æ¢‡öx¢ğÅg‚´ Ô¨—›‰Ò‘b 2Ñ}š8 •tˆlJBT›èë6Ó¢)! é¹|øUÕ…9Üí)èºÕ FIb†çÙÊÁ›äu¯$„‚m¢6Šc‘kn3µ§ĞBë—;ª@‘vÃ˜pIÁ¨
 œ33uX@ÑB…eŠš½^©û\51ğÁ5š<í¦R©
 ‹>ã©fİóÔIsõÕÌ¨éOc€ €0-úÜ¦;«
-05Œ#"Ø‹[~Kİ Òè¬Ü’È¿PÁØntµ4>=„Ä#7›oögC^EY²Ú!X½¶O¤"• ©eáH¬¢ÈĞS×ÍmÜY{)š4(ßÑrƒÂª–m¨€øXFqğ³-§¸éd¸%Öö’T”ÔªvÁØ8jÏ¥ Ö$øS—0¢G`½dº¯OÂTª —xA«|¶-á!Kıêù§º‘yE(    IEND®B`‚\n--- src/main/resources/assets/dragonblockinfinity/textures/item/dino_meat_cooked_raw_particule.png ---
-‰PNG
-
-   IHDR           szzô  ‹IDATxœe—İ^UÅk¿o'ıJ«Å63èt¦S
-mµø‘HB,[Qkbbâ•Á¿@.$Æ¯½ğ‚Dcô®ÑDz%"F+b&*H?'ú!mßÂÔ¶ÁéÀ|ğîåÅ~ö>ïÀišÉ9ïÙ{?ÏzµÖs´Ú[Ä”KñÏ2ï¿º—Á`6ª¤ò£’p6Vİª¼£¶±éƒÔím#+Î‰@Æmoÿ%dƒR‹ON˜!Hä\ÖÈ.ÇªDwÑ7FîpÛÊíàšÇÁ	Èv’±H©ú~MF{%ÕCÊ£²¡ºÕªë×{L®ˆ®·ÂC f’jİ{(%H]AS‡n6
-Xk½ì@D]5bd
-š¶Iñ^ÆH*»+àw-§
-V£Y—çÂ©m£ZãXaƒ3ç6ş‰c‡füØİ^î­š"Ûu18—ûZ£=³Ò[|x]?ÔˆJöî2¦4êZÎüìØ¼{ç¹øÆMŞ^ZæÉN”¾TdìÌ
-”¢¤Ù%Ù~BäÖ8#M%Cn$(ÙD3%z90åUÄ'nìäìµ4›øVA«0 cWSc%ú¹ò²B$ñåƒ{üì™óªõ®Ïì¾xlÿ>îšg-g6õ9eŸ>ıËo»¤–$ìŸ2)ñ»3D”ÎÊq^)O¿Ü”,kó¿¹uËñc‡öú×§æeúQw·şÈk™­›6òòüë8™Ø¾…ß'g®¤VºÄ#û¦™™'Í-CŞ8ÂµºnhÌ3/ÍüæàÆ;LŒßıÃÖ±.Û(ÁONüƒ;6ñükyú¥“üæÌkzuîõïº–ËæÔå7é÷ú½g¿+ïßÓah%-É´×5Şú¬Ì%‹@ìá;'=tæÅÁUåú^P,gøÑ¦§øëäq?;å”HY•Æ Õ´I%:ÿë	x}4íO¥TjİZÌ•9µwò\é^º4~êúÏ¤”0¹`¡€ÒUû[S'*ê*Ù ®„H.¿%uM…³éwˆ§ĞöpÃª€ŒX8r`Ú’¸¾iËOÿşòÉïàb2uÅ:$CœŠ4G¹RxJÀY ²İ¹İÈ3Û<25é'úŸŞÍƒ‰'†Z.‚ØŞÃ« Vİ·Ç_ûè´¥\Œ­J¶#šz%©Ë½-~î§Ä¿æ/²úÃ<°w’§ı’<4õıêt9xì(AÕMş·´Êá½3<õ™O{XO*nØ¬”bíÜãŞX-ª#ñÜ¥Ë:}}Óç/ƒaûÖMÜ^n&ŒF¡–©
-Íˆ]şe0Ğ3§æùäÁONÚÕ{ªÔƒãˆÇÇwò½_ıÙÁ Ğ§¦íöù}SŞ¾qŒÁÍ·ùÛ` Wa÷z¯WE9Î»VÀGïvxñßs,oÛü|É
-’R›”2æöÒ»n.qâê9‚³«mCô’HÎ(¤W.*¢”#aè@oK˜U~şÕ#şç¥7xåÚuf¯„«ÔLbzR7RUaªcV™	Ä÷Oû¡ÉİÜ^^æ'fµAuŠÑ,Z¿xA6¤1¿zåÕÌìàªªù”*D&Ê’(RH¡2U=8ío=pÿ½µÈ¶ÍÛè{Œ”Vc<ë(‹U@	çÜ¦Ø*½Ä)uk­uõœæŞû<s×påñ¯ß/ï®¬à…¹üâ•‹Ji…³¡QŒğŠ•ëNæ_98cåNŠëÁ5ÀüÎò­ïgb×Î^½ÎlãÜÂ-’VF†S•Dc^Ôjï6uT-}d"gH	2E’?7óß?±‹;¶láÉ?œhƒamÂ2Ì$¾Ó‡÷îáÒÍ[œY¸Áìµk*¯6à(ÕÒ¦2:ç X÷M T¦šªˆ¼pU;6måò­·xô)W¹•jVùóÅ+znî?Ì/¼E_ÈÃhÖ°q¢‘«Âj¥·8RÈÉeì–JVv¯†¬e Ó#açkûØ°²
-Û*=«q¹øC±åâ§Í\3”	¶jõÎ6iuHr)‰».,«Ûü(V? v}f”ScBRP¨óë+Ñ€BaEB•!tYW
-çTİrhHõşŠ¤úUT×1óş«“×îÍ¸ ]xĞMÂÕUc Y·‰h®™bÒ,b£Ü¸.r‘aF²nŞ[¼¼˜X°G*zâÜÆ­Vrëœ—I™õul/”¯›:´j*xŸsƒ‡"º»§Ù±º=•ã…ı?½ÉÇfñT    IEND®B`‚\n--- src/main/resources/assets/dragonblockinfinity/textures/item/dino_meat_raw.png ---
+05Œ#"Ø‹[~Kİ Òè¬Ü’È¿PÁØntµ4>=„Ä#7›oögC^EY²Ú!X½¶O¤"• ©eáH¬¢ÈĞS×ÍmÜY{)š4(ßÑrƒÂª–m¨€øXFqğ³-§¸éd¸%Öö’T”ÔªvÁØ8jÏ¥ Ö$øS—0¢G`½dº¯OÂTª —xA«|¶-á!Kıêù§º‘yE(    IEND®B`‚\n--- src/main/resources/assets/dragonblockinfinity/textures/item/dino_meat_raw.png ---
 ‰PNG
 
    IHDR   @   @   ªiqŞ  ¹IDATxÅ›œ]UÇÿ÷•yóŞ›I&IHB&„RIèH±!6š,
@@ -4731,19 +5024,7 @@ Lªr^IÓOËŸW
 “Ìç=¨$„eš=Ò£ßP
 |°ñ#÷½:]KwOçu»uéääòp½ò
 ¯Á„¤2 Oš-ÙI@¡êF­Ñ²")şÉSõá<ºÓ»Øêò¿I˜Ü—U5èT[6Œ“rsØÔ95A=§¬¿À˜ Qå€Ì’DÔ(€†{°®·f¯Vª·“åN>
-şM,Ğ 9E~Çx‚-<u(ê€E}°`ê£&¥0a, îeÊ; º®6”“õÙ‰ñv!.à	1]yld(?K¼õFšÕàbñ:Íëx4Æ3gBã«V?ëKÆ7º…"%g¤  NÁÕ×ÔC¸%ƒhõI}r£"\²Ş¤)•øÕP¢ úD¹¤Oƒ²ÀÄåL}Bm£¥¡zà¥BÒnŒmä}~ê=Á°À¢Pô§£A}2¾Ñ"øÿÌä`ÌÑ    IEND®B`‚\n--- src/main/resources/assets/dragonblockinfinity/textures/item/dino_meat_raw_particule.png ---
-‰PNG
-
-   IHDR           szzô  5IDATxœeW[Œ]Sş¾µwg:3mµ¥­ªN¢÷„ŠˆKÒÆ%ñ"‘ˆKÄ%¡‰gáx@“Vª!xñÄ‰à!!A¨ T›¢´´3sö9{Ïú<¬ı{ÎÌdÎÙ{íµşËwùë¢ 	 é£½ ì\•­%²»$¨tOhË¦5öé0¿òf´ìpæ¥Á!R„´0äëÚhÓÉ‰–€r.Äö3ÖEİWÎqè%!Øfùnğ•¤=%Ë7I9§dÕIB €( ´Ç)ÿşÿeYÅ˜Cd.Fû¨Ò:’ğ[ŠĞTªÓeg9ä¥ˆzœ³ÉÑ¶‘:·äÎWÈ (Z£Z|B`î5ºx:)Î–¬|BàPßÚ¼Fon\£R†G˜'æÁY–m4`]TÃµÌ“<(w³­‰c·ß,0`î×øìÀA\¿ïGDLèö'5ê$*$eÚØT)sß ÍpŞ–©İ³‡~GÁÑ¿`0_û>$­}2jÉ¨HËOÖ–`ÌèTÀ8|½ÍÛß‡€7_zßª­×áı·§1QŸÿq¤E»Œñ²}‚‹Bª^0hÅ–äí&(±xå‰…—öhÅº5/Ñ²Kkz`ÿë/c4”xâ‹ğø?Ç™ biR€""$¹@¯HÚF`Sô‡ H$~ÀIkW¾òõÔä-{¾üï9ÁI¢°}tL•€û=2×x® Xë$ DÆ	Ö¡ï=Ë·ºÌ»kÁ˜vpQs$;8‡ZŞ‚ÏX«ßf{¸éĞQFÏÛ$:ÇcÅA¨RÔŞŸ®TvôŸ "Ù  @æ¶ÆAKŒ«n"v×[İˆşŒ9 \È“ÁÇ[u^›\ª±…£¸ñûßˆÌ Ü€˜È@`Ş³/Øyˆ@ÌÀ3‚™Æ
-Y«ƒiJŠä–ƒ³| †y{&ÖÑ¯!Ëˆ1š<+¦„™*ùÚ›&U=òöo9'‹!4OÜY•!©Arv”„õç¬ğMk5½q­@§˜Àh	¨‹
-MÑGmM1ğÿÍŞİúö¢ÓuğšKôÚ™ËÔ”}_ŸÖUé¯ìc×©5(*Š
-ÓVjæŞ›õóUçªyõ9ÕEÏöì£.éù2½ íÔIİ^ßïŞS®½u5‡³-F3ÑCVÂì±cù„î9ôÕ0`óŠå¹ğT3Ç0óÁ;xõ´•ÊÓ¼”Vøä„câÑÆ552‚‹V¬Àä—ã“ßÃ¶o¡3 ”®¹ àË“:aÉ&–.Ã3Ÿ~™ì˜íñ?n’p^‡>Ì9‚±Ãsâ‘…Ú2^â§ºÁS³=›(â¬V?ÿé_Ü½lv•»IÜ?:ªóÇJ|4×à¥ª")è?Œ¢€†'"×•secîŠO ğÆY§jë•Û ½Os¢^î Ìó`ƒ9”³Lé¥Ï2Ÿ¨OË6„|x.k~¾CŸWÖŸ¨-kÖA]²NÙ´6‡\Š]€†fH!´ÓŒÜ@ò‘'ÙDŸ6Ô¯şšÁ¢©)¼7=ÛîóŞÎ«ÁÎÕãÊ†cS©SP(ùÄ-ıÊêbèZZ&ªõªMQ¡7:ÀŞU#]½äİvM…'O.´ÿ²M:óâ©{›Òö´ÿóå M )hJ£yY';v™$ Ä$§Ş³é³«ë­M§HÊF¸õÏÎ>|uëÀGæøòwûPFÿ„åæ!3ÿ8¤¬	„É-»¦ÖiKúT”óØ¹l©¶>F2´ % övnÊ¶<ì Á<‹“Xˆ Q`–&c	<ÿ&§J[¥|¨=/
-Œtgeâm
-4M	$ØH¬íÜ—\h“EøØŞF dßÏôíT¦hPJDˆ J·û¬Än©‰~CÅÊ>÷-·¢û•Í¿0¹Y%wÌZÙP
-
-±ëÕİÑ'WİáµÍ
- µ°ë7LG²çñXLó("¸È…'õ+´CŠõ3!iP•c$[ ,EÿF ¸ PŒŞ{
-@Œ	PV	eDÚømàdnOëî~Ş‡`·ˆ¢ğ/ÃÌ ™MÖß    IEND®B`‚\n--- src/main/resources/assets/dragonblockinfinity/textures/item/senzu1.png ---
+şM,Ğ 9E~Çx‚-<u(ê€E}°`ê£&¥0a, îeÊ; º®6”“õÙ‰ñv!.à	1]yld(?K¼õFšÕàbñ:Íëx4Æ3gBã«V?ëKÆ7º…"%g¤  NÁÕ×ÔC¸%ƒhõI}r£"\²Ş¤)•øÕP¢ úD¹¤Oƒ²ÀÄåL}Bm£¥¡zà¥BÒnŒmä}~ê=Á°À¢Pô§£A}2¾Ñ"øÿÌä`ÌÑ    IEND®B`‚\n--- src/main/resources/assets/dragonblockinfinity/textures/item/senzu1.png ---
 ‰PNG
 
    IHDR   @   @   ªiqŞ   ”IDATxœe›ytäWuç?ïÕ&•¤ZTÚ×n©¥îVïİnÛml<†@;,a $†dÎI9$“8á&dÈÌp2„IN !“m29$œ ^ Cğî¶»İîE­}—JR©JªRíËïÍ¿÷~¿Ÿ@ç”Jú­ïİû½÷~ï½ï‰J`@) PJ!„ĞÇ€ĞßæB…B @˜Cú÷KB?_) $ö½Ja	ûo÷} ?ù\çıæ—~úË»@)}«@Y|¸Pø•2·èç!B¢,ûáfğJ™	gÊ¹G¿À}’¾Ö~™R8Ï(-PR úYÊsŸ°8JW”²Ğ—ØÖãwtå—t$°pd)‘®´$ÊLĞ½ÃU eĞ \}™”óp­móL¡Q£ Dai­£”riOPê¿•ƒ&!$fÊ#v1Â"J¡”pÆèÜïŒIØpAã÷V•;4ó^åœÊ#ÙÏB8×›IÛ& Õe5h`¡H!QæÙÊ˜•ÒĞ?ˆrpÇà"Ê#4~e€ R,e!¤D(£13{[Ëz®›ÓÂˆ-,­U!@X(ÚøØ½ãÊj(ÊµJIşï•+ÂR)¿rñ‚*û(+"ø¯Ï¼ôâ{¤òÙ£–ƒ$WÊ6š”A‚3w}DCÅÌDyÇ­¢ì_³iáJN¨Ÿ˜œqH.˜]é
@@ -4889,7 +5170,31 @@ g/õ.¸äó’­³ı£xx]ÉØk¾0´JÍu¢´0Ÿ¹¿ïµ™Rì2¾U8Ñ:2œ»î9Ç_\‰81ÈâdZ6¾ñäÆ…7§ß”
 —¼©WfäMá<—øDƒ×Œµ#4éÏ´´¢{–³ÙƒÇèí/öçâ²"/~||å9#Ì;–ñ3Õâ?ºg9&‡{ÑÆğİ(_îK/Äù–1<\ïÆ–êR<÷»!dgÍ ‚/©*râW‡.¬È‚ot•ùÙxì^æ$p}€	®9°fE	Šr21-	K=Ãğó^Şè™R°¤E`iß¼ãí§bt´µ÷úpªa³ÀGÁ­( 6®öââE.¼Ïršãtq™í®å1tÊyféìc˜>Àäœ×[õE 	ÎïÃ2/ x¸±oé§wßk–ş–xuøi®{	a2ÀU}W€‹sÊ±u&êğæ‘Sœ0ĞàOÇètF2iH"­ûq—òø¶A!ç”zq2àÆÿìÃV†¥®n.òSÏk¼Ìcï]•‡_Çú4¢¼67÷Ë15Ö²Î)`’RãK¤-J`Ip4ï­¢s%“^Ç9r&ÀòöÛ/íü û`nõsqz+ˆæd
 °ûŞ:‡ÊÊLË±ÆEEóèè[YQE%æ,¿‹&à¶»ÑZŒS"U°µk‰1rà6‚êä&P)1&ÉZÂ’ƒ ŠÇÉ0¡¸şö7µá•Nà
 ûÃ|ğì„C]X·†XÌ"su˜Œ@=¼.ãb”ˆ8¡)@å²ó¥óª 1ıµ	È?¿•n—p÷Í{«)hì*ÍNN¦'ş¡}}	G,üó—òn×ee¢O){}®$‚Îixz“âb\_æåoùy›ùü‹£\+aW®ÍÍğ¬a kşKÙßÔ‚
-š,_ş=Í”«©[J²´óıÀÉ›¬õ·Xıçg˜}şµÒË¬ôw5U<şïvUàtÀ…oêXpØ3¬„“™z×ÿæy%rÕºœ¼ø£°¾Ëˆ÷•0¿ ˆ§^>ky3õÚuè§X2>L±-‰ä:íí5yßÍ€¾UõŞÌ5é¹J@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(2ÿ­ŞÕÌ§º#˜    IEND®B`‚\n--- src/main/resources/data/dragonblockinfinity/forge/biome_modifier/dirty_stone_spawns.json ---
+š,_ş=Í”«©[J²´óıÀÉ›¬õ·Xıçg˜}şµÒË¬ôw5U<şïvUàtÀ…oêXpØ3¬„“™z×ÿæy%rÕºœ¼ø£°¾Ëˆ÷•0¿ ˆ§^>ky3õÚuè§X2>L±-‰ä:íí5yßÍ€¾UõŞÌ5é¹J@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(% ”€PJ@	(2ÿ­ŞÕÌ§º#˜    IEND®B`‚\n--- src/main/resources/assets/dragonblockinfinity/textures/particle/dino_meat_cooked_raw_particule.png ---
+‰PNG
+
+   IHDR           szzô  ‹IDATxœe—İ^UÅk¿o'ıJ«Å63èt¦S
+mµø‘HB,[Qkbbâ•Á¿@.$Æ¯½ğ‚Dcô®ÑDz%"F+b&*H?'ú!mßÂÔ¶ÁéÀ|ğîåÅ~ö>ïÀišÉ9ïÙ{?ÏzµÖs´Ú[Ä”KñÏ2ï¿º—Á`6ª¤ò£’p6Vİª¼£¶±éƒÔím#+Î‰@Æmoÿ%dƒR‹ON˜!Hä\ÖÈ.ÇªDwÑ7FîpÛÊíàšÇÁ	Èv’±H©ú~MF{%ÕCÊ£²¡ºÕªë×{L®ˆ®·ÂC f’jİ{(%H]AS‡n6
+Xk½ì@D]5bd
+š¶Iñ^ÆH*»+àw-§
+V£Y—çÂ©m£ZãXaƒ3ç6ş‰c‡füØİ^î­š"Ûu18—ûZ£=³Ò[|x]?ÔˆJöî2¦4êZÎüìØ¼{ç¹øÆMŞ^ZæÉN”¾TdìÌ
+”¢¤Ù%Ù~BäÖ8#M%Cn$(ÙD3%z90åUÄ'nìäìµ4›øVA«0 cWSc%ú¹ò²B$ñåƒ{üì™óªõ®Ïì¾xlÿ>îšg-g6õ9eŸ>ıËo»¤–$ìŸ2)ñ»3D”ÎÊq^)O¿Ü”,kó¿¹uËñc‡öú×§æeúQw·şÈk™­›6òòüë8™Ø¾…ß'g®¤VºÄ#û¦™™'Í-CŞ8ÂµºnhÌ3/ÍüæàÆ;LŒßıÃÖ±.Û(ÁONüƒ;6ñükyú¥“üæÌkzuîõïº–ËæÔå7é÷ú½g¿+ïßÓah%-É´×5Şú¬Ì%‹@ìá;'=tæÅÁUåú^P,gøÑ¦§øëäq?;å”HY•Æ Õ´I%:ÿë	x}4íO¥TjİZÌ•9µwò\é^º4~êúÏ¤”0¹`¡€ÒUû[S'*ê*Ù ®„H.¿%uM…³éwˆ§ĞöpÃª€ŒX8r`Ú’¸¾iËOÿşòÉïàb2uÅ:$CœŠ4G¹RxJÀY ²İ¹İÈ3Û<25é'úŸŞÍƒ‰'†Z.‚ØŞÃ« Vİ·Ç_ûè´¥\Œ­J¶#šz%©Ë½-~î§Ä¿æ/²úÃ<°w’§ı’<4õıêt9xì(AÕMş·´Êá½3<õ™O{XO*nØ¬”bíÜãŞX-ª#ñÜ¥Ë:}}Óç/ƒaûÖMÜ^n&ŒF¡–©
+Íˆ]şe0Ğ3§æùäÁONÚÕ{ªÔƒãˆÇÇwò½_ıÙÁ Ğ§¦íöù}SŞ¾qŒÁÍ·ùÛ` Wa÷z¯WE9Î»VÀGïvxñßs,oÛü|É
+’R›”2æöÒ»n.qâê9‚³«mCô’HÎ(¤W.*¢”#aè@oK˜U~şÕ#şç¥7xåÚuf¯„«ÔLbzR7RUaªcV™	Ä÷Oû¡ÉİÜ^^æ'fµAuŠÑ,Z¿xA6¤1¿zåÕÌìàªªù”*D&Ê’(RH¡2U=8ío=pÿ½µÈ¶ÍÛè{Œ”Vc<ë(‹U@	çÜ¦Ø*½Ä)uk­uõœæŞû<s×påñ¯ß/ï®¬à…¹üâ•‹Ji…³¡QŒğŠ•ëNæ_98cåNŠëÁ5ÀüÎò­ïgb×Î^½ÎlãÜÂ-’VF†S•Dc^Ôjï6uT-}d"gH	2E’?7óß?±‹;¶láÉ?œhƒamÂ2Ì$¾Ó‡÷îáÒÍ[œY¸Áìµk*¯6à(ÕÒ¦2:ç X÷M T¦šªˆ¼pU;6måò­·xô)W¹•jVùóÅ+znî?Ì/¼E_ÈÃhÖ°q¢‘«Âj¥·8RÈÉeì–JVv¯†¬e Ó#açkûØ°²
+Û*=«q¹øC±åâ§Í\3”	¶jõÎ6iuHr)‰».,«Ûü(V? v}f”ScBRP¨óë+Ñ€BaEB•!tYW
+çTİrhHõşŠ¤úUT×1óş«“×îÍ¸ ]xĞMÂÕUc Y·‰h®™bÒ,b£Ü¸.r‘aF²nŞ[¼¼˜X°G*zâÜÆ­Vrëœ—I™õul/”¯›:´j*xŸsƒ‡"º»§Ù±º=•ã…ı?½ÉÇfñT    IEND®B`‚\n--- src/main/resources/assets/dragonblockinfinity/textures/particle/dino_meat_raw_particule.png ---
+‰PNG
+
+   IHDR           szzô  5IDATxœeW[Œ]Sş¾µwg:3mµ¥­ªN¢÷„ŠˆKÒÆ%ñ"‘ˆKÄ%¡‰gáx@“Vª!xñÄ‰à!!A¨ T›¢´´3sö9{Ïú<¬ı{ÎÌdÎÙ{íµşËwùë¢ 	 é£½ ì\•­%²»$¨tOhË¦5öé0¿òf´ìpæ¥Á!R„´0äëÚhÓÉ‰–€r.Äö3ÖEİWÎqè%!Øfùnğ•¤=%Ë7I9§dÕIB €( ´Ç)ÿşÿeYÅ˜Cd.Fû¨Ò:’ğ[ŠĞTªÓeg9ä¥ˆzœ³ÉÑ¶‘:·äÎWÈ (Z£Z|B`î5ºx:)Î–¬|BàPßÚ¼Fon\£R†G˜'æÁY–m4`]TÃµÌ“<(w³­‰c·ß,0`î×øìÀA\¿ïGDLèö'5ê$*$eÚØT)sß ÍpŞ–©İ³‡~GÁÑ¿`0_û>$­}2jÉ¨HËOÖ–`ÌèTÀ8|½ÍÛß‡€7_zßª­×áı·§1QŸÿq¤E»Œñ²}‚‹Bª^0hÅ–äí&(±xå‰…—öhÅº5/Ñ²Kkz`ÿë/c4”xâ‹ğø?Ç™ biR€""$¹@¯HÚF`Sô‡ H$~ÀIkW¾òõÔä-{¾üï9ÁI¢°}tL•€û=2×x® Xë$ DÆ	Ö¡ï=Ë·ºÌ»kÁ˜vpQs$;8‡ZŞ‚ÏX«ßf{¸éĞQFÏÛ$:ÇcÅA¨RÔŞŸ®TvôŸ "Ù  @æ¶ÆAKŒ«n"v×[İˆşŒ9 \È“ÁÇ[u^›\ª±…£¸ñûßˆÌ Ü€˜È@`Ş³/Øyˆ@ÌÀ3‚™Æ
+Y«ƒiJŠä–ƒ³| †y{&ÖÑ¯!Ëˆ1š<+¦„™*ùÚ›&U=òöo9'‹!4OÜY•!©Arv”„õç¬ğMk5½q­@§˜Àh	¨‹
+MÑGmM1ğÿÍŞİúö¢ÓuğšKôÚ™ËÔ”}_ŸÖUé¯ìc×©5(*Š
+ÓVjæŞ›õóUçªyõ9ÕEÏöì£.éù2½ íÔIİ^ßïŞS®½u5‡³-F3ÑCVÂì±cù„î9ôÕ0`óŠå¹ğT3Ç0óÁ;xõ´•ÊÓ¼”Vøä„câÑÆ552‚‹V¬Àä—ã“ßÃ¶o¡3 ”®¹ àË“:aÉ&–.Ã3Ÿ~™ì˜íñ?n’p^‡>Ì9‚±Ãsâ‘…Ú2^â§ºÁS³=›(â¬V?ÿé_Ü½lv•»IÜ?:ªóÇJ|4×à¥ª")è?Œ¢€†'"×•secîŠO ğÆY§jë•Û ½Os¢^î Ìó`ƒ9”³Lé¥Ï2Ÿ¨OË6„|x.k~¾CŸWÖŸ¨-kÖA]²NÙ´6‡\Š]€†fH!´ÓŒÜ@ò‘'ÙDŸ6Ô¯şšÁ¢©)¼7=ÛîóŞÎ«ÁÎÕãÊ†cS©SP(ùÄ-ıÊêbèZZ&ªõªMQ¡7:ÀŞU#]½äİvM…'O.´ÿ²M:óâ©{›Òö´ÿóå M )hJ£yY';v™$ Ä$§Ş³é³«ë­M§HÊF¸õÏÎ>|uëÀGæøòwûPFÿ„åæ!3ÿ8¤¬	„É-»¦ÖiKúT”óØ¹l©¶>F2´ % övnÊ¶<ì Á<‹“Xˆ Q`–&c	<ÿ&§J[¥|¨=/
+Œtgeâm
+4M	$ØH¬íÜ—\h“EøØŞF dßÏôíT¦hPJDˆ J·û¬Än©‰~CÅÊ>÷-·¢û•Í¿0¹Y%wÌZÙP
+
+±ëÕİÑ'WİáµÍ
+ µ°ë7LG²çñXLó("¸È…'õ+´CŠõ3!iP•c$[ ,EÿF ¸ PŒŞ{
+@Œ	PV	eDÚømàdnOëî~Ş‡`·ˆ¢ğ/ÃÌ ™MÖß    IEND®B`‚\n--- src/main/resources/data/dragonblockinfinity/forge/biome_modifier/dirty_stone_spawns.json ---
 {
   "type": "forge:add_spawns",
   "biomes": "dragonblockinfinity:dirty_stone",

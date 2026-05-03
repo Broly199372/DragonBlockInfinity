@@ -5,7 +5,7 @@ import net.minecraft.resources.ResourceLocation;
 
 public enum Race {
     HUMAN(null),
-    FRIEZA(new ResourceLocation(DragonBlockInfinity.MOD_ID, "textures/cc/male/ac1b.png")),
+    ARCONSIAN(new ResourceLocation(DragonBlockInfinity.MOD_ID, "textures/cc/male/ac1b.png")),
     SAIYAN(null),
     NAMEKIAN(null),
     ANDROID(null);
@@ -22,7 +22,7 @@ public enum Race {
     public String getDisplayName() {
         return switch (this) {
             case HUMAN    -> "Human";
-            case FRIEZA   -> "Frieza Race";
+            case ARCONSIAN -> "Arconsian";
             case SAIYAN   -> "Saiyan";
             case NAMEKIAN -> "Namekian";
             case ANDROID  -> "Android";
