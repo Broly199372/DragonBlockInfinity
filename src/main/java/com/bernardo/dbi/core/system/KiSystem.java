@@ -1,13 +1,8 @@
 package com.bernardo.dbi.core.system;
-
 /**
  * Sistema de Ki (Energia) para o mod Dragon Block Infinity
  * Gerencia o consumo e geração de Ki para habilidades especiais
  */
-
-
-
-
 public class KiSystem {
     
     // Custo de Ki base para um ataque de soco
