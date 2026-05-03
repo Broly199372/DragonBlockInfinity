@@ -33,11 +33,6 @@ public class MenuControl {
 
     public static final ResourceLocation GUI_BG =
         new ResourceLocation(DragonBlockInfinity.MOD_ID, "textures/gui/gui.png");
-
-    public static final ResourceLocation GUI_BG2 =
-        new ResourceLocation(DragonBlockInfinity.MOD_ID, "textures/gui/gui2.png");
-
-
     // ── PÁGINA ATUAL ─────────────────────────────────────────────
     /** Página que será aberta na próxima chamada de open(). */
     public static int currentPage = ID_CHARACTER_CREATION;
