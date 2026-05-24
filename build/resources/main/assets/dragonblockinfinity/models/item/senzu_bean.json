@@ -1,5 +1,0 @@
-{
-  "parent":"item/generated",
-  "textures":{"layer0":"dragonblockinfinity:item/senzu1"},
-  "overrides":[{"predicate":{"using_item":1},"model":"dragonblockinfinity:item/senzu_bean_eating"}]
-}
