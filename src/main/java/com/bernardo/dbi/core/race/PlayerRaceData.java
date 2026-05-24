@@ -4,7 +4,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
-import jdk.jfr.FlightRecorder;
 
 public class PlayerRaceData {
     private static final Map<UUID, Race> RACES = new HashMap<>();

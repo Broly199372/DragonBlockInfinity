@@ -31,6 +31,9 @@ public class MenuControl {
     public static final ResourceLocation GUI_ICONS_BTN =
         new ResourceLocation(DragonBlockInfinity.MOD_ID, "textures/gui/icons_btn.png");
 
+    public static final ResourceLocation GUI_BG2 =
+        new ResourceLocation(DragonBlockInfinity.MOD_ID, "textures/gui/gui2.png");
+
     public static final ResourceLocation GUI_BG =
         new ResourceLocation(DragonBlockInfinity.MOD_ID, "textures/gui/gui.png");
     // ── PÁGINA ATUAL ─────────────────────────────────────────────

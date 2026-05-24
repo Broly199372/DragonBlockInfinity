@@ -1,11 +1,14 @@
 package com.bernardo.dbi.client.particle;
 
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.particle.Particle;
 import net.minecraft.client.particle.ParticleProvider;
+import net.minecraft.client.particle.ParticleRenderType;
 import net.minecraft.client.particle.SpriteSet;
 import net.minecraft.client.particle.TextureSheetParticle;
 import net.minecraft.core.particles.SimpleParticleType;
 
+/** Provider de partículas para carnes de dino. */
 public class DinoMeatParticleProvider implements ParticleProvider<SimpleParticleType> {
 
     private final SpriteSet sprites;
@@ -15,12 +18,25 @@ public class DinoMeatParticleProvider implements ParticleProvider<SimpleParticle
     }
 
     @Override
-    public TextureSheetParticle createParticle(SimpleParticleType type, ClientLevel level,
+    public Particle createParticle(SimpleParticleType type, ClientLevel level,
             double x, double y, double z, double dx, double dy, double dz) {
-        net.minecraft.client.particle.BreakingItemParticle particle =
-            net.minecraft.client.particle.BreakingItemParticle.createBreaking(
-                level, x, y, z, net.minecraft.world.item.Items.PORKCHOP);
-        particle.pickSprite(sprites);
-        return particle;
+        return new DinoMeatParticle(level, x, y, z, dx, dy, dz, sprites);
+    }
+
+    static class DinoMeatParticle extends TextureSheetParticle {
+
+        DinoMeatParticle(ClientLevel level, double x, double y, double z,
+                         double dx, double dy, double dz, SpriteSet sprites) {
+            super(level, x, y, z, dx, dy, dz);
+            this.pickSprite(sprites);
+            this.lifetime = 12;
+            this.gravity = 0.9f;
+            this.scale(0.5f);
+        }
+
+        @Override
+        public ParticleRenderType getRenderType() {
+            return ParticleRenderType.PARTICLE_SHEET_OPAQUE;
+        }
     }
 }

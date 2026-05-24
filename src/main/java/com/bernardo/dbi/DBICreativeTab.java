@@ -48,7 +48,7 @@ public class DBICreativeTab {
                 output.accept(DBIItems.DINO_MEAT_RAW.get());
                 output.accept(DBIItems.DINO_MEAT_COOKED.get());
                 output.accept(DBIItems.SENZU_BEAN.get());
-                output.accept(DBIItems.GOKU_HELMET.get());
+                
                 output.accept(DBIItems.GOKU_CHESTPLATE.get());
                 output.accept(DBIItems.GOKU_LEGGINGS.get());
                 output.accept(DBIItems.GOKU_BOOTS.get());
